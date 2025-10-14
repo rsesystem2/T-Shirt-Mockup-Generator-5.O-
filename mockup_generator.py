@@ -149,7 +149,7 @@ if st.button("🚀 Generate Mockups for Selected Batch"):
 
                         output_name = f"{graphic_name}_{color_name}_tee.png"
                         img_byte_arr = io.BytesIO()
-                        shirt_copy.save(img_byte_arr, format='JPG')
+                        shirt_copy.save(img_byte_arr, format='PNG')
                         img_byte_arr.seek(0)
                         zipf.writestr(output_name, img_byte_arr.getvalue())
 
@@ -163,4 +163,5 @@ if st.button("🚀 Generate Mockups for Selected Batch"):
             file_name="all_mockups_by_design.zip",
             mime="application/zip"
         )
+
 
