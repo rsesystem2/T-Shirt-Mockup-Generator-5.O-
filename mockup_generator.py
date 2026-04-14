@@ -6,97 +6,101 @@ import io
 import cv2
 import os
 
-# ---------------- PAGE CONFIG ----------------
-st.set_page_config(page_title="Mockup Generator", layout="centered")
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="Mockup Studio", layout="wide")
 
-st.title("👕 Minimal Mockup Generator")
-st.caption("Batch generate clean product mockups (fast & consistent)")
+st.markdown("""
+<style>
+.block-container {padding-top: 2rem;}
+button {border-radius: 8px !important;}
+</style>
+""", unsafe_allow_html=True)
 
-# ---------------- PRESETS ----------------
-TEMPLATE_PROFILES = {
-    "plain": {"padding": 0.45, "offset": 23},
-    "model": {"padding": 0.45, "offset": 38}
-}
+st.title("👕 Mockup Studio")
+st.caption("Create clean product mockups in seconds")
 
 # ---------------- SIDEBAR ----------------
-st.sidebar.header("⚙️ Controls")
+st.sidebar.header("⚙️ Design Controls")
 
-padding_override = st.sidebar.slider("Padding Override", 0.2, 1.2, 1.0, 0.05)
-vertical_shift = st.sidebar.slider("Vertical Fine Adjust", -200, 200, 0)
-horizontal_shift = st.sidebar.slider("Horizontal Shift", -200, 200, 0)
-scale_override = st.sidebar.slider("Scale Override", 0.5, 1.5, 1.0)
+st.sidebar.markdown("### 🧵 Plain T-Shirts")
+plain_padding = st.sidebar.slider("Print Size (Plain)", 0.2, 1.2, 0.45)
+plain_offset = st.sidebar.slider("Vertical Position (Plain)", -50, 100, 23)
 
-variation_count = st.sidebar.slider("Variations per Design", 1, 5, 1)
+st.sidebar.markdown("### 🧍 Model T-Shirts")
+model_padding = st.sidebar.slider("Print Size (Model)", 0.2, 1.2, 0.45)
+model_offset = st.sidebar.slider("Vertical Position (Model)", -50, 100, 38)
+
+st.sidebar.markdown("### 🎛️ Fine Adjustments")
+x_shift = st.sidebar.slider("Horizontal Adjust", -200, 200, 0)
+y_shift = st.sidebar.slider("Vertical Adjust", -200, 200, 0)
+scale_override = st.sidebar.slider("Scale Multiplier", 0.5, 1.5, 1.0)
+
+st.sidebar.markdown("### 🔁 Variations")
+variation_count = st.sidebar.slider("Variations per Design", 1, 5, 2)
 
 # ---------------- CACHE ----------------
 @st.cache_data
-def load_image(file_bytes):
-    return Image.open(io.BytesIO(file_bytes)).convert("RGBA")
+def load_image(file):
+    return Image.open(io.BytesIO(file.read())).convert("RGBA")
 
 @st.cache_data
-def get_shirt_bbox_cached(image_array):
-    gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+def get_bbox(image):
+    img_cv = np.array(image.convert("RGB"))[:, :, ::-1]
+    gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+
     thresh = cv2.adaptiveThreshold(
         gray, 255,
         cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY_INV,
         11, 2
     )
+
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
-        largest = max(contours, key=cv2.contourArea)
-        return cv2.boundingRect(largest)
+        return cv2.boundingRect(max(contours, key=cv2.contourArea))
     return None
 
 # ---------------- UPLOAD ----------------
-st.markdown("## 📤 Upload")
+st.markdown("## 📤 Upload Files")
 
-design_files = st.file_uploader(
-    "Design Images",
-    type=["png", "jpg", "jpeg"],
-    accept_multiple_files=True
-)
+col1, col2 = st.columns(2)
 
-shirt_files = st.file_uploader(
-    "Shirt Templates (use naming: black_plain.png, white_model.png)",
-    type=["png", "jpg", "jpeg"],
-    accept_multiple_files=True
-)
+with col1:
+    design_files = st.file_uploader("Upload Designs", accept_multiple_files=True)
 
-# ---------------- NAMING ----------------
+with col2:
+    shirt_files = st.file_uploader("Upload T-Shirt Templates", accept_multiple_files=True)
+
+# ---------------- DESIGN NAMING ----------------
 design_names = {}
 if design_files:
-    st.markdown("## ✏️ Name Designs")
-    for file in design_files:
-        default = os.path.splitext(file.name)[0]
-        design_names[file.name] = st.text_input(file.name, value=default)
+    st.markdown("## ✏️ Name Your Designs")
+    for f in design_files:
+        name = os.path.splitext(f.name)[0]
+        design_names[f.name] = st.text_input(f.name, value=name)
 
 # ---------------- PREVIEW ----------------
 if design_files and shirt_files:
-    st.markdown("## 👀 Preview")
+    st.markdown("## 👀 Live Preview")
 
-    selected_design = st.selectbox("Design", design_files, format_func=lambda x: x.name)
-    selected_shirt = st.selectbox("Template", shirt_files, format_func=lambda x: x.name)
+    selected_design = st.selectbox("Choose Design", design_files, format_func=lambda x: x.name)
+    selected_shirt = st.selectbox("Choose Template", shirt_files, format_func=lambda x: x.name)
 
-    # load images
-    design = load_image(selected_design.read())
-    shirt = load_image(selected_shirt.read())
+    design = load_image(selected_design)
+    shirt = load_image(selected_shirt)
 
-    # detect type
     parts = selected_shirt.name.lower().split("_")
-    template_type = parts[1] if len(parts) > 1 else "plain"
+    is_model = "model" in parts
 
-    preset = TEMPLATE_PROFILES.get(template_type, TEMPLATE_PROFILES["plain"])
+    padding = model_padding if is_model else plain_padding
+    offset = model_offset if is_model else plain_offset
 
-    padding = preset["padding"] * padding_override
-    offset_pct = preset["offset"]
-
-    img_cv = np.array(shirt.convert("RGB"))[:, :, ::-1]
-    bbox = get_shirt_bbox_cached(img_cv)
+    bbox = get_bbox(shirt)
 
     if bbox:
         sx, sy, sw, sh = bbox
-        scale = min(sw / design.width, sh / design.height, 1.0)
+
+        scale = min(sw / design.width, sh / design.height)
         scale *= padding * scale_override
 
         new_w = int(design.width * scale)
@@ -104,8 +108,8 @@ if design_files and shirt_files:
 
         resized = design.resize((new_w, new_h))
 
-        x = sx + (sw - new_w) // 2 + horizontal_shift
-        y = sy + int(sh * offset_pct / 100) + vertical_shift
+        x = sx + (sw - new_w) // 2 + x_shift
+        y = sy + int(sh * offset / 100) + y_shift
     else:
         resized = design
         x = (shirt.width - design.width) // 2
@@ -119,81 +123,64 @@ if design_files and shirt_files:
 # ---------------- GENERATE ----------------
 if st.button("🚀 Generate Mockups"):
     if not (design_files and shirt_files):
-        st.warning("Upload designs and templates")
+        st.warning("Upload designs and templates first")
     else:
         progress = st.progress(0)
 
         master_zip = io.BytesIO()
 
-        with zipfile.ZipFile(master_zip, "w", zipfile.ZIP_DEFLATED) as master_zipf:
+        with zipfile.ZipFile(master_zip, "w", zipfile.ZIP_DEFLATED) as master:
 
             total = len(design_files)
 
-            for i, design_file in enumerate(design_files):
+            for i, d_file in enumerate(design_files):
+                design = load_image(d_file)
+                name = design_names.get(d_file.name, "design")
 
-                design = load_image(design_file.read())
-                name = design_names.get(design_file.name, "design")
+                for shirt_file in shirt_files:
+                    shirt = load_image(shirt_file)
 
-                inner_zip_buffer = io.BytesIO()
+                    parts = shirt_file.name.lower().split("_")
+                    is_model = "model" in parts
+                    color = parts[0]
 
-                with zipfile.ZipFile(inner_zip_buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+                    padding = model_padding if is_model else plain_padding
+                    offset = model_offset if is_model else plain_offset
 
-                    for shirt_file in shirt_files:
+                    bbox = get_bbox(shirt)
 
-                        shirt = load_image(shirt_file.read())
+                    for v in range(variation_count):
+                        shirt_copy = shirt.copy()
 
-                        parts = shirt_file.name.lower().split("_")
-                        template_type = parts[1] if len(parts) > 1 else "plain"
-                        color = parts[0]
+                        if bbox:
+                            sx, sy, sw, sh = bbox
 
-                        preset = TEMPLATE_PROFILES.get(template_type, TEMPLATE_PROFILES["plain"])
+                            scale = min(sw / design.width, sh / design.height)
+                            scale *= padding * scale_override
+                            scale *= (1 + v * 0.05)
 
-                        padding = preset["padding"] * padding_override
-                        offset_pct = preset["offset"]
+                            new_w = int(design.width * scale)
+                            new_h = int(design.height * scale)
 
-                        img_cv = np.array(shirt.convert("RGB"))[:, :, ::-1]
-                        bbox = get_shirt_bbox_cached(img_cv)
+                            resized = design.resize((new_w, new_h))
 
-                        for v in range(variation_count):
+                            x = sx + (sw - new_w) // 2 + x_shift
+                            y = sy + int(sh * offset / 100) + y_shift + v * 5
+                        else:
+                            resized = design
+                            x = (shirt.width - design.width) // 2
+                            y = (shirt.height - design.height) // 2
 
-                            shirt_copy = shirt.copy()
+                        shirt_copy.paste(resized, (x, y), resized)
 
-                            if bbox:
-                                sx, sy, sw, sh = bbox
+                        rgb = shirt_copy.convert("RGB")
 
-                                scale = min(sw / design.width, sh / design.height, 1.0)
-                                scale *= padding * scale_override
+                        img_bytes = io.BytesIO()
+                        rgb.save(img_bytes, format="JPEG", quality=90, optimize=True)
+                        img_bytes.seek(0)
 
-                                # slight variation
-                                scale *= (1 + (v * 0.05))
-
-                                new_w = int(design.width * scale)
-                                new_h = int(design.height * scale)
-
-                                resized = design.resize((new_w, new_h))
-
-                                x = sx + (sw - new_w) // 2 + horizontal_shift
-                                y = sy + int(sh * offset_pct / 100) + vertical_shift + (v * 5)
-
-                            else:
-                                resized = design
-                                x = (shirt.width - design.width) // 2
-                                y = (shirt.height - design.height) // 2
-
-                            shirt_copy.paste(resized, (x, y), resized)
-
-                            rgb = shirt_copy.convert("RGB")
-
-                            img_bytes = io.BytesIO()
-                            rgb.save(img_bytes, format="JPEG", quality=90, optimize=True)
-                            img_bytes.seek(0)
-
-                            filename = f"{name}_{color}_{template_type}_v{v+1}.jpg"
-
-                            zipf.writestr(filename, img_bytes.getvalue())
-
-                inner_zip_buffer.seek(0)
-                master_zipf.writestr(f"{name}.zip", inner_zip_buffer.read())
+                        filename = f"{name}_{color}_{'model' if is_model else 'plain'}_v{v+1}.jpg"
+                        master.writestr(filename, img_bytes.read())
 
                 progress.progress((i + 1) / total)
 
